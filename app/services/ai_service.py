@@ -47,6 +47,8 @@ Examples:
 class AIService:
     """Service for AI-powered card recommendations."""
 
+    _commander_cache: dict = {}  # class-level cache, persists for server lifetime
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -139,14 +141,19 @@ class AIService:
             return f"Error communicating with {provider}: {str(e)}"
 
     async def _lookup_commander(self, name: str) -> Optional[str]:
-        """Fetch commander card data from Scryfall and format it for context."""
+        """Fetch commander card data from Scryfall, cached in memory."""
+        cache_key = name.lower().strip()
+        if cache_key in self._commander_cache:
+            logger.info("  [step 0] commander '%s' served from cache", name)
+            return self._commander_cache[cache_key]
         try:
             async with ScryfallClient() as client:
                 results = await client.search_cards(f'!\'{name}\'')
             if not results:
+                self._commander_cache[cache_key] = None
                 return None
             c = results[0]
-            lines = [f"Commander card data (from Scryfall):"]
+            lines = ["Commander card data (from Scryfall):"]
             lines.append(f"  Name: {c.get('name')}")
             lines.append(f"  Mana cost: {c.get('mana_cost', '')}")
             lines.append(f"  Type: {c.get('type_line', '')}")
@@ -154,7 +161,10 @@ class AIService:
             if c.get('power'):
                 lines.append(f"  P/T: {c['power']}/{c['toughness']}")
             lines.append(f"  Color identity: {c.get('color_identity', [])}")
-            return "\n".join(lines)
+            result = "\n".join(lines)
+            self._commander_cache[cache_key] = result
+            logger.info("  [step 0] commander '%s' fetched and cached", name)
+            return result
         except Exception as e:
             logger.warning("Commander lookup failed for '%s': %s", name, e)
             return None

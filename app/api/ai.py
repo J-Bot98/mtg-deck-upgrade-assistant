@@ -2,6 +2,7 @@
 API endpoint for AI chat / card recommendations.
 """
 
+import logging
 from typing import Optional, List, Dict
 
 from fastapi import APIRouter, Depends
@@ -12,6 +13,7 @@ from app.api.dependencies import get_db
 from app.clients.llm_client import PROVIDERS
 from app.services.ai_service import AIService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class ChatRequest(BaseModel):
@@ -39,6 +41,9 @@ async def ai_chat(
 ):
     """Chat with the AI about card recommendations for your Commander deck."""
     service = AIService(db)
+
+    logger.info("AI Chat → set_code=%s set_codes=%s commander=%s provider=%s",
+                request.set_code, request.set_codes, request.commander, request.provider)
 
     # Pass all selected sets to the service
     set_codes = request.set_codes or ([request.set_code] if request.set_code else [])

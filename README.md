@@ -168,7 +168,49 @@ MTG Deck Upgrade Assistant automates this by:
 3. Supporting multi-set selection
 4. Integrating an **AI Deck Advisor** that, given a commander, analyzes available cards and suggests the most synergistic ones
 
+## 🏗️ Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                      FastAPI Backend                     │
+│                                                          │
+│  ┌────────────┐    ┌─────────────┐    ┌───────────────┐  │
+│  │  API Layer │    │  Services   │    │   Scryfall    │  │
+│  │  (routes)  │───▶│  (business  │───▶│  Client       │  │
+│  │            │    │   logic)    │    │  (httpx)      │  │
+│  └────────────┘    └──────┬──────┘    └───────────────┘  │
+│                           │                              │
+│                    ┌──────▼──────┐                       │
+│                    │ Repository  │                       │
+│                    │(data access)│                       │
+│                    └──────┬──────┘                       │
+│                           │                              │
+│                    ┌──────▼──────┐                       │
+│                    │   SQLite    │                       │
+│                    │ (aiosqlite) │                       │
+│                    └─────────────┘                       │
+└──────────────────────────────────────────────────────────┘
+```
+
+## 🛠️ Tech Stack
+
+| Layer        | Technology                              |
+|--------------|-----------------------------------------|
+| Language     | Python 3.9+                             |
+| Framework    | FastAPI                                 |
+| Database     | SQLite (async via aiosqlite)            |
+| ORM          | SQLAlchemy 2.x                          |
+| HTTP Client  | httpx (async)                           |
+| Validation   | Pydantic v2                             |
+| Templates    | Jinja2 + vanilla JS                     |
+| AI           | LiteLLM (Groq, Gemini, OpenAI, Ollama)  |
+| Data Source  | Scryfall REST API                       |
+| Testing      | pytest + pytest-asyncio                 |
+
 ## 🚀 Quick Start
+
+### Prerequisites
+- Python 3.9+
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/mtg-deck-upgrade-assistant.git
@@ -182,6 +224,59 @@ uvicorn app.main:app --reload
 ```
 
 Open **http://localhost:8000** — click **Sync Sets**, select a set, download its cards, then open the AI panel.
+
+### First Steps
+
+1. Click **Sync Sets** to download sets from Scryfall
+2. Select one or more sets from the sidebar
+3. Click a set to download its cards
+4. Filter by color identity, rarity, type, oracle text
+5. Open the **🧠 AI Deck Advisor** panel, enter your API key and ask for recommendations
+
+## 📡 API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sets` | List sets with filters |
+| GET | `/api/sets/recent` | Most recent physical sets |
+| GET | `/api/sets/{code}` | Single set details |
+| GET | `/api/sets/{code}/cards` | Cards in a set |
+| GET | `/api/cards` | Cards with filters, sorting and pagination |
+| GET | `/api/cards/{id}` | Single card details |
+| POST | `/api/sync/sets` | Sync sets from Scryfall |
+| POST | `/api/sync/sets/{code}/cards` | Sync cards for a set |
+| POST | `/api/ai/chat` | Chat with AI advisor |
+
+## 🤖 AI Deck Advisor
+
+| Provider | Cost | Default model |
+|----------|------|---------------|
+| **Groq** | Free (rate limited) | qwen/qwen3.8-27b |
+| **Google Gemini** | Free | gemini-3.6-flash |
+| **DeepSeek** | ~$0.001/1K tokens | deepseek-chat |
+| **OpenAI** | Paid | gpt-4o-mini |
+| **Ollama** | Local, free | llama3.1 |
+
+The system uses a **two-step RAG pipeline**:
+1. AI analyzes the question and extracts search keywords
+2. DB is queried with those keywords → only relevant cards are passed to the AI
+3. AI generates recommendations based exclusively on real cards found
+
+The API key is stored in `localStorage` and never logged server-side.
+
+## 🗺️ Roadmap
+
+- [x] Phase 1 — Scryfall data ingestion & local caching
+- [x] Phase 2 — UI with advanced filters and multi-set selection
+- [x] Phase 3 — AI Deck Advisor (multi-provider, RAG, Scryfall lookup)
+- [ ] Phase 4 — Decklist import (paste list)
+- [ ] Phase 5 — Deck analysis (curve, colors, strategy)
+- [ ] Phase 6 — Semantic search (Qdrant + embeddings)
+- [ ] Phase 7 — LangGraph recommendation agent
+
+## 📁 Project structure
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed documentation of every file.
 
 ## ⚠️ Disclaimer
 
