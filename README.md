@@ -66,7 +66,7 @@ MTG Deck Upgrade Assistant automatizza questo processo:
 
 ```bash
 # Clona il repository
-git clone https://github.com/YOUR_USERNAME/mtg-deck-upgrade-assistant.git
+git clone https://github.com/J-Bot98/mtg-deck-upgrade-assistant.git
 cd mtg-deck-upgrade-assistant
 
 # Crea l'ambiente virtuale
@@ -213,7 +213,7 @@ MTG Deck Upgrade Assistant automates this by:
 - Python 3.9+
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/mtg-deck-upgrade-assistant.git
+git clone https://github.com/J-Bot98/mtg-deck-upgrade-assistant.git
 cd mtg-deck-upgrade-assistant
 python -m venv .venv
 source .venv/bin/activate   # Linux/Mac
@@ -332,7 +332,7 @@ This project was built with the assistance of GitHub Copilot (AI) for educationa
 
 ```bash
 # Clone the repository
-git clone https://github.com/YOUR_USERNAME/mtg-deck-upgrade-assistant.git
+git clone https://github.com/J-Bot98/mtg-deck-upgrade-assistant.git
 cd mtg-deck-upgrade-assistant
 
 # Create virtual environment
