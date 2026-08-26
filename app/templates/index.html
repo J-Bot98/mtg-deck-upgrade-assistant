@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MTG Deck Upgrade Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<div class="header">
+    <h1>🃏 MTG Deck Upgrade Assistant</h1>
+    <div class="status" id="status-bar">Ready</div>
+</div>
+
+<!-- ===== MAIN LAYOUT ===== -->
+<div class="main-layout">
+
+    <!-- ===== SIDEBAR ===== -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h2>📦 Sets</h2>
+            <div class="sidebar-actions">
+                <button class="btn btn-primary btn-sm" onclick="syncSets()">Sync Sets</button>
+                <select class="filter-input" id="set-type-filter" onchange="loadSets()">
+                    <option value="">All types</option>
+                    <option value="expansion" selected>Expansions</option>
+                    <option value="commander">Commander</option>
+                    <option value="masters">Masters</option>
+                    <option value="draft_innovation">Draft Innovation</option>
+                    <option value="core">Core</option>
+                </select>
+            </div>
+        </div>
+        <div class="set-list" id="set-list">
+            <div class="empty-state">
+                <h3>No sets loaded</h3>
+                <p>Click "Sync Sets" to download from Scryfall</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CONTENT ===== -->
+    <div class="content">
+
+        <!-- Filters -->
+        <div class="filters-bar">
+            <div class="filter-group">
+                <label>Name:</label>
+                <input type="text" class="filter-input" id="filter-name"
+                       placeholder="Search cards..." onkeyup="debounceLoadCards()">
+            </div>
+            <div class="filter-group">
+                <label>Text:</label>
+                <input type="text" class="filter-input" id="filter-text"
+                       placeholder="mill, discard, draw..." onkeyup="debounceLoadCards()">
+            </div>
+            <div class="filter-group">
+                <label>Type:</label>
+                <input type="text" class="filter-input" id="filter-type"
+                       placeholder="creature, instant..." onkeyup="debounceLoadCards()">
+            </div>
+            <div class="filter-group">
+                <label>Rarity:</label>
+                <select class="filter-input" id="filter-rarity" onchange="loadCards()">
+                    <option value="">All</option>
+                    <option value="mythic">Mythic</option>
+                    <option value="rare">Rare</option>
+                    <option value="uncommon">Uncommon</option>
+                    <option value="common">Common</option>
+                </select>
+            </div>
+            <div class="filter-group">
+                <label>Mana Value:</label>
+                <select class="filter-input" id="filter-cmc" onchange="loadCards()">
+                    <option value="">Any</option>
+                    <option value="0-0">0</option>
+                    <option value="0-1">0-1</option>
+                    <option value="2-3">2-3</option>
+                    <option value="4-5">4-5</option>
+                    <option value="6-7">6-7</option>
+                    <option value="8-99">8+</option>
+                </select>
+            </div>
+            <div class="cards-count" id="cards-count"></div>
+            <div class="pagination" id="pagination" style="display:none">
+                <button class="btn btn-sm" id="btn-prev" onclick="changePage(-1)">&#8592; Prev</button>
+                <span id="page-info"></span>
+                <button class="btn btn-sm" id="btn-next" onclick="changePage(1)">Next &#8594;</button>
+            </div>
+            <div class="filter-group" style="margin-left:auto">
+                <label>&#128269; Size:</label>
+                <input type="range" id="card-size" min="100" max="340" value="200" step="10"
+                       oninput="resizeCards(this.value)">
+            </div>
+        </div>
+
+        <!-- Color checkboxes -->
+        <div class="color-bar">
+            <span class="color-label">Color Identity:</span>
+            <label class="color-check" title="White">
+                <input type="checkbox" value="W" onchange="loadCards()"> <span class="mana mana-w">W</span>
+            </label>
+            <label class="color-check" title="Blue">
+                <input type="checkbox" value="U" onchange="loadCards()"> <span class="mana mana-u">U</span>
+            </label>
+            <label class="color-check" title="Black">
+                <input type="checkbox" value="B" onchange="loadCards()"> <span class="mana mana-b">B</span>
+            </label>
+            <label class="color-check" title="Red">
+                <input type="checkbox" value="R" onchange="loadCards()"> <span class="mana mana-r">R</span>
+            </label>
+            <label class="color-check" title="Green">
+                <input type="checkbox" value="G" onchange="loadCards()"> <span class="mana mana-g">G</span>
+            </label>
+            <label class="color-check" title="Colorless">
+                <input type="checkbox" value="C" onchange="loadCards()"> <span class="mana mana-c">C</span>
+            </label>
+        </div>
+
+        <!-- Card Grid -->
+        <div class="card-grid" id="card-grid">
+            <div class="empty-state">
+                <h3>Select a set to explore cards</h3>
+                <p>Pick a set from the sidebar, then download its cards</p>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- ===== AI CHAT BUTTON ===== -->
+<button class="chat-toggle" onclick="toggleChat()" title="AI Assistant">🧠</button>
+
+<!-- ===== AI CHAT PANEL ===== -->
+<div class="chat-panel" id="chat-panel">
+    <div class="chat-header">
+        <h3>🧠 AI Deck Advisor</h3>
+        <button class="chat-close" onclick="toggleChat()">✕</button>
+    </div>
+
+    <!-- Settings -->
+    <div class="chat-settings">
+        <div class="chat-settings-row">
+            <label>Provider:</label>
+            <select id="ai-provider" onchange="onProviderChange()">
+                <option value="groq">Groq (Free)</option>
+                <option value="gemini">Google Gemini (Free)</option>
+                <option value="deepseek">DeepSeek (Cheap)</option>
+                <option value="openai">OpenAI</option>
+                <option value="ollama">Ollama (Local)</option>
+            </select>
+        </div>
+        <div class="chat-settings-row">
+            <label>API Key:</label>
+            <input type="password" id="ai-api-key" placeholder="Paste your API key..." oninput="saveApiKey()">
+            <a class="key-link" id="key-link" href="https://console.groq.com/keys" target="_blank">Get key</a>
+        </div>
+    </div>
+
+    <!-- Messages -->
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-msg ai">Hi! I'm your MTG deck advisor. 🃏
+
+Tell me:
+1. What's your Commander?
+2. What's your deck strategy?
+3. Select a set from the sidebar
+
+Then I'll recommend the best cards for your deck!</div>
+    </div>
+
+    <!-- Input -->
+    <div class="chat-input-area">
+        <textarea class="chat-input" id="chat-input"
+                  placeholder="Ask about cards for your deck..."
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+        <button class="chat-send" id="chat-send" onclick="sendChat()">Send</button>
+    </div>
+</div>
+
+<!-- ===== JAVASCRIPT ===== -->
+<script>
+let selectedSets = new Set();
+let debounceTimer = null;
+let currentPage = 1;
+
+function setStatus(msg) {
+    document.getElementById('status-bar').textContent = msg;
+}
+
+// --- Get selected colors from checkboxes ---
+function getSelectedColors() {
+    const checks = document.querySelectorAll('.color-check input:checked');
+    const colors = [];
+    checks.forEach(c => colors.push(c.value));
+    return colors.join(',');
+}
+
+// --- Sync sets ---
+async function syncSets() {
+    setStatus('Syncing sets from Scryfall...');
+    document.getElementById('set-list').innerHTML =
+        '<div class="loading"><div class="spinner"></div><p>Downloading sets...</p></div>';
+
+    try {
+        const resp = await fetch('/api/sync/sets', { method: 'POST' });
+        const data = await resp.json();
+        setStatus('Synced ' + data.total_retrieved + ' sets (' + data.new_records + ' new)');
+        loadSets();
+    } catch (err) {
+        setStatus('Error syncing sets: ' + err.message);
+    }
+}
+
+// --- Load sets into sidebar ---
+async function loadSets() {
+    const setType = document.getElementById('set-type-filter').value;
+    let url = '/api/sets/recent?limit=30&physical_only=true';
+    if (setType) url += '&set_type=' + setType;
+
+    try {
+        const resp = await fetch(url);
+        const sets = await resp.json();
+
+        if (sets.length === 0) {
+            document.getElementById('set-list').innerHTML =
+                '<div class="empty-state"><h3>No sets found</h3><p>Click "Sync Sets" first</p></div>';
+            return;
+        }
+
+        let html = '';
+        for (const s of sets) {
+            const isSelected = selectedSets.has(s.code) ? 'selected' : '';
+            const safeName = s.name.replace(/'/g, "\\'");
+            html += '<div class="set-item ' + isSelected + '" onclick="selectSet(\'' + s.code + '\', \'' + safeName + '\')">'
+                + '<div>'
+                + '<div class="set-name">' + s.name + '</div>'
+                + '<div class="set-meta">' + (s.released_at || 'TBD') + ' · ' + s.card_count + ' cards</div>'
+                + '</div>'
+                + '<div class="set-code">' + s.code + '</div>'
+                + '</div>';
+        }
+        document.getElementById('set-list').innerHTML = html;
+    } catch (err) {
+        setStatus('Error loading sets: ' + err.message);
+    }
+}
+
+// --- Select/deselect a set (toggle) ---
+async function selectSet(code, name) {
+    if (selectedSets.has(code)) {
+        selectedSets.delete(code);
+    } else {
+        selectedSets.add(code);
+    }
+    currentPage = 1;
+
+    // Re-render sidebar to update highlights
+    document.querySelectorAll('.set-item').forEach(function(el) {
+        const elCode = el.querySelector('.set-code').textContent.trim();
+        el.classList.toggle('selected', selectedSets.has(elCode));
+    });
+
+    if (selectedSets.size === 0) {
+        document.getElementById('card-grid').innerHTML =
+            '<div class="empty-state"><h3>Select a set to explore cards</h3></div>';
+        document.getElementById('cards-count').textContent = '';
+        setStatus('Ready');
+        return;
+    }
+
+    setStatus('Loading cards for ' + Array.from(selectedSets).join(', ') + '...');
+
+    // Check if newly added set has cards synced
+    if (selectedSets.has(code)) {
+        const resp = await fetch('/api/cards?set=' + code + '&page_size=1');
+        const data = await resp.json();
+        if (data.total === 0) {
+            document.getElementById('card-grid').innerHTML =
+                '<div class="empty-state">'
+                + '<h3>No cards cached for ' + name + '</h3>'
+                + '<p>Cards need to be downloaded from Scryfall first.</p><br>'
+                + '<button class="btn btn-primary" onclick="syncCardsForSet(\'' + code + '\', \'' + name.replace(/'/g, "\\'") + '\')">Download Cards for ' + name + '</button>'
+                + '</div>';
+            setStatus('Set ' + code + ' — cards not yet synced');
+            return;
+        }
+    }
+
+    loadCards();
+}
+
+// --- Sync cards for a set ---
+async function syncCardsForSet(code, name) {
+    setStatus('Downloading cards for ' + name + '...');
+    document.getElementById('card-grid').innerHTML =
+        '<div class="loading"><div class="spinner"></div><p>Downloading cards for ' + name + '...<br>This may take a moment.</p></div>';
+
+    try {
+        const resp = await fetch('/api/sync/sets/' + code + '/cards', { method: 'POST' });
+        const data = await resp.json();
+        setStatus('Synced ' + data.total_retrieved + ' cards for ' + name);
+        loadCards();
+    } catch (err) {
+        setStatus('Error syncing cards: ' + err.message);
+        document.getElementById('card-grid').innerHTML =
+            '<div class="empty-state"><h3>Error: ' + err.message + '</h3></div>';
+    }
+}
+
+// --- Load cards into grid ---
+async function loadCards() {
+    if (selectedSets.size === 0) return;
+
+    const name = document.getElementById('filter-name').value;
+    const text = document.getElementById('filter-text').value;
+    const type = document.getElementById('filter-type').value;
+    const rarity = document.getElementById('filter-rarity').value;
+    const colors = getSelectedColors();
+    const cmc = document.getElementById('filter-cmc').value;
+
+    // Build URL with multiple set= params
+    let url = '/api/cards?' + Array.from(selectedSets).map(s => 'set=' + s).join('&')
+        + '&page=' + currentPage + '&page_size=60&unique=true';
+    if (name) url += '&name=' + encodeURIComponent(name);
+    if (text) url += '&text=' + encodeURIComponent(text);
+    if (type) url += '&type=' + encodeURIComponent(type);
+    if (rarity) url += '&rarity=' + rarity;
+    if (colors) url += '&colors=' + colors;
+    if (cmc) {
+        var parts = cmc.split('-');
+        url += '&min_cmc=' + parts[0] + '&max_cmc=' + parts[1];
+    }
+
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        document.getElementById('cards-count').textContent =
+            data.total + ' cards';
+
+        const totalPages = data.total_pages;
+        const pagination = document.getElementById('pagination');
+        if (totalPages > 1) {
+            pagination.style.display = 'flex';
+            document.getElementById('page-info').textContent = data.page + ' / ' + totalPages;
+            document.getElementById('btn-prev').disabled = data.page <= 1;
+            document.getElementById('btn-next').disabled = data.page >= totalPages;
+        } else {
+            pagination.style.display = 'none';
+        }
+
+        if (data.data.length === 0) {
+            document.getElementById('card-grid').innerHTML =
+                '<div class="empty-state"><h3>No cards match your filters</h3><p>Try adjusting the filters</p></div>';
+            return;
+        }
+
+        let html = '';
+        for (var i = 0; i < data.data.length; i++) {
+            var card = data.data[i];
+            var imgUrl = card.image_uris ? card.image_uris.normal : null;
+            var scryfallUrl = card.scryfall_uri || '#';
+
+            if (imgUrl) {
+                html += '<div class="card-item" onclick="window.open(\'' + scryfallUrl + '\', \'_blank\')" title="' + card.name + '">'
+                    + '<img src="' + imgUrl + '" alt="' + card.name + '" loading="lazy">'
+                    + '</div>';
+            } else {
+                html += '<div class="card-item" onclick="window.open(\'' + scryfallUrl + '\', \'_blank\')" title="' + card.name + '">'
+                    + '<div class="no-image">'
+                    + '<div class="card-title">' + card.name + '</div>'
+                    + '<div class="card-type">' + (card.type_line || '') + '</div>'
+                    + '<div class="card-type">' + (card.mana_cost || '') + '</div>'
+                    + '</div></div>';
+            }
+        }
+        document.getElementById('card-grid').innerHTML = html;
+        setStatus('Showing ' + data.data.length + ' of ' + data.total + ' unique cards');
+    } catch (err) {
+        setStatus('Error loading cards: ' + err.message);
+    }
+}
+
+function resizeCards(value) {
+    document.getElementById('card-grid').style.gridTemplateColumns =
+        'repeat(auto-fill, minmax(' + value + 'px, 1fr))';
+}
+
+function changePage(delta) {
+    currentPage += delta;
+    loadCards();
+    document.getElementById('card-grid').scrollIntoView({ behavior: 'smooth' });
+}
+
+function debounceLoadCards() {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(function() {
+        currentPage = 1;
+        loadCards();
+    }, 400);
+}
+
+// ---------------------------------------------------------------------------
+// AI Chat
+// ---------------------------------------------------------------------------
+var chatHistory = [];
+
+function toggleChat() {
+    const panel = document.getElementById('chat-panel');
+    const btn = document.querySelector('.chat-toggle');
+    panel.classList.toggle('open');
+    btn.style.display = panel.classList.contains('open') ? 'none' : 'flex';
+}
+
+function onProviderChange() {
+    var provider = document.getElementById('ai-provider').value;
+    var keyLinks = {
+        'groq': 'https://console.groq.com/keys',
+        'openai': 'https://platform.openai.com/api-keys',
+        'gemini': 'https://aistudio.google.com/apikey',
+        'deepseek': 'https://platform.deepseek.com/api-keys',
+        'ollama': null,
+    };
+    var link = document.getElementById('key-link');
+    var keyInput = document.getElementById('ai-api-key');
+
+    if (keyLinks[provider]) {
+        link.href = keyLinks[provider];
+        link.style.display = 'inline';
+        keyInput.style.display = 'block';
+    } else {
+        link.style.display = 'none';
+        keyInput.style.display = 'none';
+    }
+
+    // Restore saved key for this provider
+    var saved = localStorage.getItem('ai_key_' + provider);
+    if (saved) keyInput.value = saved;
+}
+
+function saveApiKey() {
+    var provider = document.getElementById('ai-provider').value;
+    var key = document.getElementById('ai-api-key').value.trim();
+    if (key) localStorage.setItem('ai_key_' + provider, key);
+}
+
+function addChatMessage(role, text) {
+    var container = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+    div.textContent = text;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+}
+
+async function sendChat() {
+    var input = document.getElementById('chat-input');
+    var message = input.value.trim();
+    if (!message) return;
+
+    var provider = document.getElementById('ai-provider').value;
+    var apiKey = document.getElementById('ai-api-key').value.trim();
+
+    if (provider !== 'ollama' && !apiKey) {
+        addChatMessage('error', 'Please enter your API key first. Click "Get key" to get a free one.');
+        return;
+    }
+
+    addChatMessage('user', message);
+    input.value = '';
+
+    var sendBtn = document.getElementById('chat-send');
+    sendBtn.disabled = true;
+    sendBtn.textContent = '...';
+
+    var body = {
+        message: message,
+        provider: provider,
+        api_key: apiKey || null,
+        set_codes: Array.from(selectedSets),
+        history: chatHistory,
+    };
+
+    console.log('[AI] sending request:', { message, provider, set_codes: Array.from(selectedSets) });
+
+    try {
+        var resp = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+
+        var data = await resp.json();
+
+        if (resp.ok) {
+            addChatMessage('ai', data.response);
+            chatHistory.push({ role: 'user', content: message });
+            chatHistory.push({ role: 'assistant', content: data.response });
+            if (chatHistory.length > 20) chatHistory = chatHistory.slice(-20);
+        } else {
+            addChatMessage('error', 'Error: ' + (data.detail || JSON.stringify(data)));
+        }
+    } catch (err) {
+        addChatMessage('error', 'Connection error: ' + err.message);
+    }
+
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+}
+
+// Init
+window.addEventListener('DOMContentLoaded', function() {
+    loadSets();
+    // Restore saved API key for default provider
+    var provider = document.getElementById('ai-provider').value;
+    var saved = localStorage.getItem('ai_key_' + provider);
+    if (saved) document.getElementById('ai-api-key').value = saved;
+});
+</script>
+
+</body>
+</html>
