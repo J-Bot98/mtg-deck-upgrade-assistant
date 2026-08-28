@@ -45,6 +45,7 @@ class MTGCard(Base):
     oracle_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     power: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
     toughness: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    edhrec_rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
     # --- Colors (stored as JSON arrays) ---
     colors: Mapped[Optional[List]] = mapped_column(JSON, nullable=True)

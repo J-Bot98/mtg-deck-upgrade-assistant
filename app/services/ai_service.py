@@ -62,8 +62,7 @@ class AIService:
         provider: str = "groq",
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        conversation_history: Optional[List[Dict[str, str]]] = None,
-    ) -> str:
+        conversation_history: Optional[List[Dict[str, str]]] = None,        visible_cards: Optional[List[str]] = None,    ) -> str:
         all_set_codes = list(set_codes or [])
         if set_code and set_code not in all_set_codes:
             all_set_codes.append(set_code)
@@ -92,7 +91,15 @@ class AIService:
         if all_set_codes:
             context_parts.append(f"Selected sets: {', '.join(s.upper() for s in all_set_codes)}")
 
-            # Step 1: ask AI what keywords to search for
+        # If the user is viewing specific cards, use those directly (skip DB search)
+        if visible_cards:
+            logger.info("  [context] using %d visible cards from UI", len(visible_cards))
+            context_parts.append(
+                f"\n--- CARDS CURRENTLY VISIBLE IN USER'S GRID ---\n"
+                + "\n".join(f"• {name}" for name in visible_cards)
+                + "\n--- END OF CARD LIST ---"
+            )
+        elif all_set_codes:
             logger.info("  [step 1] extracting search criteria from message...")
             search_keywords, search_types = await self._get_search_criteria(
                 message, commander, strategy, client
@@ -234,7 +241,7 @@ class AIService:
             type_filters = [MTGCard.type_line.ilike(f"%{t}%") for t in types]
             query = query.where(or_(*type_filters))
 
-        query = query.order_by(MTGCard.rarity.desc(), MTGCard.name).limit(60)
+        query = query.order_by(MTGCard.rarity.desc(), MTGCard.name).limit(30)
         result = await self._session.execute(query)
         return list(result.scalars().all())
 

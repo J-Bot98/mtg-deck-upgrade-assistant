@@ -79,6 +79,41 @@ class SyncService:
         )
         return summary
 
+    async def sync_cards_for_family(self, set_code: str) -> dict:
+        """Sync cards for a set AND all its sub-sets (same parent_set_code)."""
+        set_code = set_code.lower()
+
+        # Collect all set codes in the family
+        result = await self._session.execute(
+            select(MTGSet.code).where(
+                (MTGSet.code == set_code) |
+                (
+                    (MTGSet.parent_set_code == set_code) &
+                    (MTGSet.digital == False) &
+                    (MTGSet.set_type != 'alchemy')
+                )
+            )
+        )
+        family_codes = [row[0] for row in result.fetchall()]
+
+        if not family_codes:
+            return {"error": f"Set '{set_code}' not found. Run set sync first."}
+
+        logger.info("Syncing family for '%s': %s", set_code, family_codes)
+        results = []
+        for code in family_codes:
+            r = await self.sync_cards_for_set(code)
+            results.append(r)
+
+        return {
+            "set_code": set_code,
+            "family": family_codes,
+            "total_retrieved": sum(r.get("total_retrieved", 0) for r in results),
+            "new_records": sum(r.get("new_records", 0) for r in results),
+            "updated_records": sum(r.get("updated_records", 0) for r in results),
+            "details": results,
+        }
+
     # -- Card sync -----------------------------------------------------------
 
     async def sync_cards_for_set(self, set_code: str) -> dict:
@@ -175,6 +210,7 @@ class SyncService:
             "icon_svg_uri": raw.get("icon_svg_uri"),
             "scryfall_uri": raw.get("scryfall_uri"),
             "search_uri": raw.get("search_uri"),
+            "parent_set_code": raw.get("parent_set_code"),
         }
 
     @staticmethod
@@ -218,6 +254,7 @@ class SyncService:
             "set_name": raw.get("set_name"),
             "collector_number": raw.get("collector_number"),
             "rarity": raw.get("rarity"),
+            "edhrec_rank": raw.get("edhrec_rank"),
             "image_uris": raw.get("image_uris") or face.get("image_uris"),
             "prices": raw.get("prices"),
             "legalities": raw.get("legalities"),

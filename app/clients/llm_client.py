@@ -81,6 +81,10 @@ class LLMClient:
         max_tokens: int = 2000,
     ) -> str:
         """Send a message to the LLM and return the response text."""
+        # Gemini 3.x requires temperature=1.0 to avoid infinite loops / degraded output
+        if "gemini-3" in self.model or "gemini/gemini-3" in self.model:
+            temperature = 1.0
+
         messages: List[Dict[str, str]] = []
 
         if system_prompt:

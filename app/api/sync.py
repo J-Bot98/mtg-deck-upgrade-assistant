@@ -35,6 +35,43 @@ async def sync_cards_for_set(
 
     return result
 
+@router.post("/sets/{set_code}/cards/family")
+async def sync_cards_for_family(
+    set_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Sync cards for a set AND all its sub-sets (promos, tokens, commander decks, etc.)."""
+    service = SyncService(db)
+    result = await service.sync_cards_for_family(set_code)
+
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
+
+@router.delete("/sets/{set_code}/cards")
+async def delete_cards_for_set(
+    set_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete all cached cards for a set (and its sub-sets)."""
+    from sqlalchemy import delete as sql_delete
+    from app.models.card_model import MTGCard
+    from app.models.set_model import MTGSet
+    from sqlalchemy import select
+
+    set_code = set_code.lower()
+    sub_result = await db.execute(
+        select(MTGSet.code).where(MTGSet.parent_set_code == set_code)
+    )
+    family_codes = [set_code] + [r[0] for r in sub_result.fetchall()]
+
+    result = await db.execute(
+        sql_delete(MTGCard).where(MTGCard.set_code.in_(family_codes))
+    )
+    await db.commit()
+    return {"deleted": result.rowcount, "sets": family_codes}
+
 @router.post("/sets/cards/batch")
 async def sync_cards_for_multiple_sets(
     set_codes: List[str],

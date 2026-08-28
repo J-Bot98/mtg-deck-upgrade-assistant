@@ -87,10 +87,16 @@ Endpoint per l'esplorazione delle carte con filtri avanzati:
 Endpoint per triggerare la sincronizzazione dei dati da Scryfall:
 - `POST /api/sync/sets` — scarica e salva tutti i set
 - `POST /api/sync/sets/{code}/cards` — scarica e salva tutte le carte di un set
+- `POST /api/sync/sets/{code}/cards/family` — scarica il set principale **e tutti i sotto-set** (`parent_set_code == code`): Commander decks, promos, tokens, art series
+- `DELETE /api/sync/sets/{code}/cards` — cancella le carte di un set (e sotto-set) dal DB
+
+#### `app/api/decks.py` *(nuovo in v0.3)*
+Endpoint per l'analisi Commander via EDHREC:
+- `GET /api/decks/commander?name=X` — aggrega statistiche da EDHREC (main + tutti i temi: tribal, combo, budget, token, sacrifice, ecc.) in parallelo; arricchisce con dati Scryfall batch per immagini, type_line e oracle_text; supporta partner commanders (`name=Malcolm + Kediss`)
 
 #### `app/api/ai.py`
 Endpoint per il chatbot AI:
-- `POST /api/ai/chat` — riceve messaggio, set selezionati, commander, provider, API key, history
+- `POST /api/ai/chat` — riceve messaggio, set selezionati, commander, provider, API key, history, e `visible_cards` (carte visibili a schermo)
 - Supporta `set_codes` (lista) e `set_code` (legacy singolo)
 
 #### `app/clients/scryfall_client.py`
@@ -99,6 +105,9 @@ Client HTTP asincrono per le Scryfall REST API. Gestisce:
 - Paginazione automatica (`has_more` + `next_page`)
 - Retry su errori temporanei
 - `get_sets()`, `get_cards_by_set(set_code)`, `search_cards(query)`
+
+#### `app/clients/archidekt_client.py` *(client EDHREC in v0.3)*
+Client asincrono per l'API JSON pubblica di EDHREC. Aggrega il commander principale + 20+ temi in parallelo. Supporta partner commanders con `+`. Batch Scryfall `/cards/collection` per immagini e metadati.
 
 #### `app/clients/llm_client.py`
 Client LLM provider-agnostico basato su **LiteLLM**. Supporta:
@@ -118,15 +127,21 @@ Configurazione del database SQLite asincrono:
 - `get_db()` — dependency FastAPI per iniettare la sessione nelle route
 
 #### `app/models/set_model.py`
-ORM model per la tabella `sets`. Campi principali: `scryfall_id`, `code`, `name`, `released_at`, `set_type`, `card_count`, `digital`, `icon_svg_uri`. Usa `Optional[T]` (compatibile Python 3.9).
+ORM model per la tabella `sets`. Campi principali: `scryfall_id`, `code`, `name`, `released_at`, `set_type`, `card_count`, `digital`, `icon_svg_uri`, **`parent_set_code`** (FK verso il set genitore, usato per trovare i sotto-set). Usa `Optional[T]` per compatibilità Python 3.9.
 
 #### `app/models/card_model.py`
-ORM model per la tabella `cards`. Campi principali: `scryfall_id`, `oracle_id`, `name`, `mana_cost`, `cmc`, `type_line`, `oracle_text`, `colors`, `color_identity`, `keywords`, `set_code` (FK → sets.code), `rarity`, `image_uris`, `prices`, `legalities`, `raw_data`.
+ORM model per la tabella `cards`. Campi principali: `scryfall_id`, `oracle_id`, `name`, `mana_cost`, `cmc`, `type_line`, `oracle_text`, `colors`, `color_identity`, `keywords`, `set_code` (FK → sets.code), `rarity`, `image_uris`, `prices`, `legalities`, `raw_data`, **`edhrec_rank`** (rank EDHRec per ordinamento Commander).
 
 #### `app/services/ai_service.py`
-Cuore dell'AI Deck Advisor. Implementa una **pipeline RAG a due step**:
+Cuore dell'AI Deck Advisor. Implementa una pipeline contestuale a più step:
 
-1. **Step 0** — Lookup del commander su Scryfall: recupera testo oracle, tipo, color identity reali
+1. **Step 0** — Lookup del commander su Scryfall con cache in memoria
+2. **Se `visible_cards` è presente**: usa le carte visibili a schermo direttamente, salta il RAG
+3. **Altrimenti — Step 1** *(LLM call leggera)*: estrae keyword e tipi da cercare
+4. **Step 2**: query al DB con quelle keyword; fallback a top-30 per rarità se vuoto
+5. **Step 3** *(LLM call principale)*: invia il contesto e genera le raccomandazioni
+
+Gestione automatica della temperatura (Gemini 3.x richiede 1.0). Cache in-memory per commander lookup.
 2. **Step 1** *(LLM call leggera)* — dato il messaggio, estrae keyword e tipi di carte da cercare (es. `{"keywords": ["human", "attack"], "types": ["creature"]}`)
 3. **Step 2** — Query al DB con quelle keyword (oracle text OR logic); fallback a top-60 per rarità se non trova nulla
 4. **Step 3** *(LLM call principale)* — invia al modello il contesto (commander + carte filtrate) e genera i consigli
@@ -243,21 +258,23 @@ ORM model for the `sets` table. Key fields: `scryfall_id`, `code`, `name`, `rele
 ORM model for the `cards` table. Key fields: `scryfall_id`, `oracle_id`, `name`, `mana_cost`, `cmc`, `type_line`, `oracle_text`, `colors`, `color_identity`, `keywords`, `set_code` (FK → sets.code), `rarity`, `image_uris`, `prices`, `legalities`, `raw_data`.
 
 #### `app/services/ai_service.py`
-Core of the AI Deck Advisor. Implements a **two-step RAG pipeline**:
+Cuore dell'AI Deck Advisor. Implementa una pipeline contestuale a più step:
 
-1. **Step 0** — Commander Scryfall lookup: fetches real oracle text, type, color identity
-2. **Step 1** *(lightweight LLM call)* — extracts search keywords and card types from the user's message
-3. **Step 2** — DB query using those keywords (oracle text OR logic); fallback to top-60 by rarity if no matches
-4. **Step 3** *(main LLM call)* — sends context (commander data + filtered real cards) and generates recommendations
+1. **Step 0** — Lookup del commander su Scryfall con cache in memoria (non ripete la chiamata)
+2. **Se l'utente ha carte visibili a schermo** (`visible_cards`): le usa direttamente come contesto, saltando il RAG
+3. **Altrimenti — Step 1** *(LLM call leggera)*: estrae keyword e tipi da cercare (`{"keywords": [...], "types": [...]}`)
+4. **Step 2**: query al DB con quelle keyword (oracle text OR logic); fallback a top-30 per rarità se non trova nulla
+5. **Step 3** *(LLM call principale)*: invia il contesto e genera le raccomandazioni
 
-The system ensures the AI works **only with real cards present in the DB**, preventing hallucinations.
+Gestione automatica della temperatura per modello (Gemini 3.x richiede 1.0). Cache in-memory per i lookup commander.
 
 #### `app/templates/index.html`
 Single-page UI in HTML + vanilla JavaScript (no framework):
 - **Sidebar**: set list with sync, type filter, multi-select toggle
 - **Filter bar**: name, oracle text (OR), type, rarity, color identity checkboxes, mana value, pagination, card size slider
-- **Card grid**: lazy-loaded images, click → Scryfall
-- **AI Chat Panel**: provider selector, API key (stored in localStorage), user/AI/error messages
+- **Card grid**: lazy-loaded images, hover reveals ○/✓ (select) and ↗ (open Scryfall), click to select
+- **Floating export bar**: appears when cards are selected, exports `.txt` compatible with EDHREC/Moxfield/Archidekt
+- **AI Chat Panel**: provider selector, API key (localStorage), thinking indicator, wide mode
 
 #### `app/static/css/style.css`
 Custom dark theme. Components: header, sidebar+content layout, set-item, filters-bar, card-grid, card-item, chat-panel, chat-toggle button, mana symbols, pagination.

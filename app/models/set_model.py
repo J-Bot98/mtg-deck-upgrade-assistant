@@ -30,6 +30,7 @@ class MTGSet(Base):
     digital: Mapped[bool] = mapped_column(Boolean, default=False)
     nonfoil_only: Mapped[bool] = mapped_column(Boolean, default=False)
     foil_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    parent_set_code: Mapped[Optional[str]] = mapped_column(String(10), nullable=True, index=True)
 
     # --- URIs ---
     icon_svg_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

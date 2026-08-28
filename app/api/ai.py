@@ -27,7 +27,7 @@ class ChatRequest(BaseModel):
     api_key: Optional[str] = None
     model: Optional[str] = None
     history: Optional[List[Dict[str, str]]] = None
-
+    visible_cards: Optional[List[str]] = None  # card names currently shown in the grid
 class ChatResponse(BaseModel):
     """Response from the AI chat endpoint."""
     response: str
@@ -57,6 +57,7 @@ async def ai_chat(
         api_key=request.api_key,
         model=request.model,
         conversation_history=request.history,
+        visible_cards=request.visible_cards,
     )
 
     # Determine which model was actually used

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commander Decks · MTG Deck Upgrade Assistant</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ===== HEADER ===== -->
+<div class="header">
+    <h1>🃏 MTG Deck Upgrade Assistant</h1>
+    <nav class="page-nav">
+        <a href="/" class="page-nav-btn">🗂 Explore Cards</a>
+        <a href="/decks" class="page-nav-btn active">📋 Commander Decks</a>
+    </nav>
+    <div class="status" id="status-bar">Ready</div>
+</div>
+
+<!-- ===== MAIN ===== -->
+<div class="deck-page">
+
+    <div class="deck-page-header">
+        <h2>📋 Commander Decks</h2>
+        <p>Search <strong>EDHREC</strong> for Commander card statistics — inclusion rate and synergy score across thousands of registered decks.</p>
+    </div>
+
+    <div class="deck-search-bar">
+        <input type="text" id="commander-input" class="filter-input"
+               placeholder="Commander (e.g. Krenko, Mob Boss) — partners: Malcolm + Kediss"
+               onkeydown="if(event.key==='Enter') searchCommanderDecks()">
+        <button class="btn btn-primary" onclick="searchCommanderDecks()">🔍 Analyze</button>
+        <button class="btn btn-sm" onclick="clearCacheAndSearch()" title="Clear cache and re-fetch">↺</button>
+        <span id="deck-status" style="font-size:0.85rem;color:#888"></span>
+    </div>
+
+    <!-- Card filters (visible after results load) -->
+    <div id="deck-filters" style="display:none" class="deck-filter-bar">
+        <input type="text" class="filter-input" id="filter-text"
+               placeholder="oracle text (,=OR ;=AND !=excl)" oninput="renderCards()">
+        <input type="text" class="filter-input" id="filter-type"
+               placeholder="type (,=OR ;=AND !=excl)" oninput="renderCards()">
+        <input type="text" class="filter-input" id="filter-tag"
+               placeholder="Scryfall tag: ramp  draw  removal  (one tag, !tag=exclude)" oninput="debounceTagFilter()">
+        <div class="color-checks" style="display:flex;gap:4px;align-items:center">
+            <label class="color-check" title="White"><input type="checkbox" value="W" onchange="renderCards()"> <span class="mana mana-w">W</span></label>
+            <label class="color-check" title="Blue"><input type="checkbox" value="U" onchange="renderCards()"> <span class="mana mana-u">U</span></label>
+            <label class="color-check" title="Black"><input type="checkbox" value="B" onchange="renderCards()"> <span class="mana mana-b">B</span></label>
+            <label class="color-check" title="Red"><input type="checkbox" value="R" onchange="renderCards()"> <span class="mana mana-r">R</span></label>
+            <label class="color-check" title="Green"><input type="checkbox" value="G" onchange="renderCards()"> <span class="mana mana-g">G</span></label>
+        </div>
+        <select class="filter-input" id="filter-sort" onchange="renderCards()" style="width:150px">
+            <option value="decks">Inclusion ↓</option>
+            <option value="synergy">Synergy ↓</option>
+            <option value="name">Name A→Z</option>
+        </select>
+        <label style="font-size:0.85rem;color:#888;white-space:nowrap">
+            Min %: <input type="number" id="filter-min-pct" class="filter-input" value="0" min="0" max="100" style="width:55px" oninput="renderCards()">
+        </label>
+        <span id="deck-count" style="font-size:0.85rem;color:#888;margin-left:auto"></span>
+        <div class="filter-group">
+            <label>&#128269; Size:</label>
+            <input type="range" id="deck-card-size" min="100" max="340" value="200" step="10"
+                   oninput="document.getElementById('deck-results').style.gridTemplateColumns='repeat(auto-fill,minmax('+this.value+'px,1fr))'">
+        </div>
+    </div>
+
+    <div id="deck-results" class="card-grid" style="flex:1;overflow-y:auto"></div>
+
+</div>
+
+<!-- ===== EXPORT BAR ===== -->
+<div id="export-bar" style="display:none">
+    <span id="export-count">0 cards selected</span>
+    <button class="btn btn-primary btn-sm" onclick="exportTxt()">⬇ Export .txt</button>
+    <button class="btn btn-sm" onclick="clearSelection()">✕ Clear</button>
+</div>
+
+<script>
+// Init — restore cached EDHREC results if available
+window.addEventListener('DOMContentLoaded', function() {
+    var cached = localStorage.getItem('edhrec_cache');
+    if (cached) {
+        try {
+            var data = JSON.parse(cached);
+            document.getElementById('commander-input').value = data.commander || '';
+            allCards = data.cards || [];
+            var numDecks = data.num_decks || '?';
+            document.getElementById('deck-status').textContent = numDecks.toLocaleString() + ' decks on EDHREC';
+            document.getElementById('status-bar').textContent = numDecks.toLocaleString() + ' registered decks';
+            document.getElementById('deck-filters').style.display = 'flex';
+            renderCards();
+        } catch(e) {}
+    }
+});
+
+var allCards = [];
+var selectedCards = new Set();
+var tagFilterNames = null; // null = no tag filter; Set = only these card names
+var tagDebounce = null;
+
+function debounceTagFilter() {
+    clearTimeout(tagDebounce);
+    tagDebounce = setTimeout(applyTagFilter, 600);
+}
+
+async function applyTagFilter() {
+    var tag = document.getElementById('filter-tag').value.trim();
+    if (!tag) { tagFilterNames = null; renderCards(); return; }
+    var exclude = tag.startsWith('!');
+    var cleanTag = exclude ? tag.slice(1).trim() : tag;
+
+    var statusEl = document.getElementById('deck-status');
+    statusEl.textContent = 'Searching tag "' + cleanTag + '" on Scryfall...';
+
+    function normalizeName(s) {
+        return (s || '').replace(/[\u2019\u02BC\u0060\u00B4]/g, "'").toLowerCase().trim();
+    }
+
+    try {
+        // Clean tag: remove punctuation that breaks Scryfall query
+        var safeTag = cleanTag.replace(/[,;]/g, '').trim();
+        if (!safeTag) { tagFilterNames = null; renderCards(); return; }
+
+        var url = 'https://api.scryfall.com/cards/search?q=otag%3A' + encodeURIComponent(safeTag);
+        var names = new Set();
+        var pages = 0;
+        while (url && pages < 8) {  // max 8 pages = ~1400 cards
+            pages++;
+            var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+            if (!resp.ok) throw new Error('Tag not found');
+            var data = await resp.json();
+            (data.data || []).forEach(function(c) { names.add(normalizeName(c.name)); });
+            url = data.next_page || null;
+        }
+        tagFilterNames = { names: names, exclude: exclude, normalize: normalizeName };
+        statusEl.textContent = (exclude ? 'Excluding' : 'Tag') + ' "' + cleanTag + '": ' + names.size + ' cards';
+        renderCards();
+    } catch (err) {
+        statusEl.textContent = 'Tag "' + cleanTag + '" not found on Scryfall';
+        tagFilterNames = null;
+        renderCards();
+    }
+}
+
+function parseFilter(value, text) {
+    // same , / ; / ! logic as index.html
+    if (!value) return true;
+    var orGroups = value.split(',').map(function(g) { return g.trim(); }).filter(Boolean);
+    return orGroups.some(function(group) {
+        return group.split(';').every(function(term) {
+            term = term.trim();
+            var exclude = term.startsWith('!') || term.startsWith('-');
+            var word = (exclude ? term.slice(1) : term).toLowerCase();
+            var match = (text || '').toLowerCase().includes(word);
+            return exclude ? !match : match;
+        });
+    });
+}
+
+function renderCards() {
+    var textFilter = document.getElementById('filter-text').value;
+    var typeFilter = document.getElementById('filter-type').value;
+    var sortBy = document.getElementById('filter-sort').value;
+    var minPct = parseInt(document.getElementById('filter-min-pct').value) || 0;
+    var selectedColors = Array.from(document.querySelectorAll('.color-check input:checked')).map(function(c) { return c.value; });
+
+    var filtered = allCards.filter(function(c) {
+        if (c.pct < minPct) return false;
+        if (!parseFilter(typeFilter, c.type_line || '')) return false;
+        if (!parseFilter(textFilter, c.oracle_text || '')) return false;
+        if (tagFilterNames) {
+            var norm = tagFilterNames.normalize || function(s) { return s; };
+            var inTag = tagFilterNames.names.has(norm(c.name));
+            if (tagFilterNames.exclude ? inTag : !inTag) return false;
+        }
+        if (selectedColors.length > 0 && c.color_identity) {
+            var allColors = ['W','U','B','R','G'];
+            var excluded = allColors.filter(function(col) { return !selectedColors.includes(col); });
+            if (excluded.some(function(col) { return (c.color_identity || []).includes(col); })) return false;
+        }
+        return true;
+    });
+
+    if (sortBy === 'synergy') filtered.sort(function(a, b) { return b.synergy - a.synergy; });
+    else if (sortBy === 'name') filtered.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    else filtered.sort(function(a, b) { return b.decks - a.decks; });
+
+    document.getElementById('deck-count').textContent = filtered.length + ' cards';
+
+    if (filtered.length === 0) {
+        document.getElementById('deck-results').innerHTML = '<div class="empty-state"><h3>No cards match your filters</h3></div>';
+        return;
+    }
+
+    var html = '';
+    filtered.forEach(function(card) {
+        // Use CDN URL from backend (already fetched via batch), fall back to API endpoint
+        var imgUrl = (card.image_uris && card.image_uris.normal)
+            ? card.image_uris.normal
+            : 'https://api.scryfall.com/cards/named?exact=' + encodeURIComponent(card.name) + '&format=image&version=normal';
+        var scryfallUrl = card.scryfall_uri || ('https://scryfall.com/search?q=' + encodeURIComponent(card.name));
+        var isSelected = selectedCards.has(card.name) ? ' selected' : '';
+        var badge = '<div style="position:absolute;top:6px;right:6px;background:rgba(10,14,26,0.8);color:#4ecca3;font-size:0.7rem;padding:2px 5px;border-radius:4px">' + card.pct + '%</div>';
+
+        html += '<div class="card-item' + isSelected + '" onclick="toggleDeckCard(\'' + card.name.replace(/'/g, "\\'") + '\', this)" title="' + card.name + '">'
+            + '<div class="card-actions"><div class="card-check">' + (isSelected ? '✓' : '○') + '</div>'
+            + '<a class="card-scryfall-link" href="' + scryfallUrl + '" target="_blank" onclick="event.stopPropagation()" title="Scryfall">↗</a></div>'
+            + '<img src="' + imgUrl + '" alt="' + card.name + '" loading="lazy"'
+            + ' onerror="this.style.display=\'none\';this.nextSibling.style.display=\'flex\'">'
+            + '<div class="no-image" style="display:none"><div class="card-title">' + card.name + '</div>'
+            + '<div class="card-type" style="color:#555;font-size:0.7rem">image unavailable</div></div>'
+            + badge + '</div>';
+    });
+    document.getElementById('deck-results').innerHTML = html;
+}
+
+function clearCacheAndSearch() {
+    localStorage.removeItem('edhrec_cache');
+    allCards = [];
+    tagFilterNames = null;
+    document.getElementById('deck-filters').style.display = 'none';
+    document.getElementById('deck-results').innerHTML = '';
+    document.getElementById('deck-status').textContent = '';
+    searchCommanderDecks();
+}
+
+async function searchCommanderDecks() {
+    var name = document.getElementById('commander-input').value.trim();
+    if (!name) return;
+    var statusEl = document.getElementById('deck-status');
+
+    statusEl.textContent = 'Fetching from EDHREC...';
+    document.getElementById('deck-filters').style.display = 'none';
+    document.getElementById('deck-results').innerHTML =
+        '<div class="loading"><div class="spinner"></div><p>Loading EDHREC data...</p></div>';
+
+    try {
+        var resp = await fetch('/api/decks/commander?name=' + encodeURIComponent(name));
+        var data = await resp.json();
+
+        if (!resp.ok) {
+            document.getElementById('deck-results').innerHTML =
+                '<div class="empty-state"><h3>' + (data.detail || 'Error') + '</h3></div>';
+            statusEl.textContent = '';
+            return;
+        }
+
+        allCards = data.cards;
+        // Cache results so they survive page navigation
+        localStorage.setItem('edhrec_cache', JSON.stringify({
+            commander: name, num_decks: data.num_decks, cards: data.cards
+        }));
+        var numDecks = data.num_decks || '?';
+        statusEl.textContent = numDecks.toLocaleString() + ' decks on EDHREC';
+        document.getElementById('status-bar').textContent = numDecks.toLocaleString() + ' registered decks';
+        document.getElementById('deck-filters').style.display = 'flex';
+        document.getElementById('filter-text').value = '';
+        document.getElementById('filter-type').value = '';
+        document.getElementById('filter-tag').value = '';
+        document.getElementById('filter-min-pct').value = '0';
+        tagFilterNames = null;
+        renderCards();
+
+    } catch (err) {
+        document.getElementById('deck-results').innerHTML =
+            '<div class="empty-state"><h3>Error: ' + err.message + '</h3></div>';
+        statusEl.textContent = '';
+    }
+}
+
+function updateExportBar() {
+    var bar = document.getElementById('export-bar');
+    var count = selectedCards.size;
+    if (count > 0) {
+        bar.style.display = 'flex';
+        document.getElementById('export-count').textContent = count + ' card' + (count !== 1 ? 's' : '') + ' selected';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function clearSelection() {
+    selectedCards.clear();
+    document.querySelectorAll('.deck-card-row.selected').forEach(function(el) {
+        el.classList.remove('selected');
+        el.querySelector('.deck-card-check').textContent = '○';
+    });
+    updateExportBar();
+}
+
+function exportTxt() {
+    var text = Array.from(selectedCards).join('\n');
+    var blob = new Blob([text], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'commander-decklist-' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+}
+
+function toggleDeckCard(name, el) {
+    if (selectedCards.has(name)) {
+        selectedCards.delete(name);
+        el.classList.remove('selected');
+        el.querySelector('.deck-card-check').textContent = '○';
+    } else {
+        selectedCards.add(name);
+        el.classList.add('selected');
+        el.querySelector('.deck-card-check').textContent = '✓';
+    }
+    updateExportBar();
+}
+
+</script>
+
+</body>
+</html>

@@ -14,9 +14,12 @@ Quando esce una nuova espansione di MTG, i giocatori Commander devono revisionar
 
 MTG Deck Upgrade Assistant automatizza questo processo:
 1. Scarica e cachea localmente tutti i set e le carte da Scryfall API
-2. Permette di esplorare le carte con filtri avanzati (colore, rarità, tipo, testo oracle, mana value)
-3. Supporta la selezione multipla di set
-4. Integra un **AI Deck Advisor** che, dato un commander, analizza le carte disponibili e suggerisce le più sinergiche
+2. Scarica automaticamente i **sotto-set** (Commander decks, promos, tokens) con un click
+3. Permette di esplorare le carte con **filtri avanzati** (color identity Commander, tipo con AND/OR/esclusione, testo oracle, ordinamento EDHRec)
+4. Esclude automaticamente token, terre base, arte, alchemy e memorabilia
+5. Permette di **selezionare le carte** e **esportarle in un file .txt** compatibile con EDHREC, Moxfield, Archidekt
+6. Integra un **AI Deck Advisor** contestuale che analizza le carte visibili a schermo e suggerisce le più sinergiche per il tuo commander
+7. Offre una pagina **Commander Decks** che interroga EDHREC su tutti i temi disponibili per un commander e mostra le carte più usate con filtri per tag Scryfall, tipo, colore e sinergia
 
 ## 🏗️ Architettura
 
@@ -90,10 +93,13 @@ Documentazione API: **http://localhost:8000/docs**
 ### Primi passi
 
 1. Clicca **Sync Sets** per scaricare i set da Scryfall
-2. Seleziona uno o più set dalla sidebar
-3. Clicca sul set per scaricare le carte (`Download Cards`)
-4. Filtra per colore identità, rarità, tipo, testo oracle
-5. Apri il pannello **🧠 AI Deck Advisor**, inserisci la tua API key e chiedi consigli
+2. Seleziona uno o più set dalla sidebar (multi-select con toggle)
+3. Clicca **⬇ with sub-sets** per scaricare le carte + tutti i sotto-set
+4. Filtra per color identity Commander, tipo (`creature;!land`), testo oracle (`mill,draw`)
+5. Ordina per **EDHRec Rank**, Mana Value o Nome
+6. **Hover su una carta** → appaiono due bottoni in basso a sinistra: ○/✓ per selezionarla, ↗ per aprire Scryfall
+7. Seleziona più carte e clicca **⬇ Export .txt** dalla barra floating per scaricare la lista — compatibile con EDHREC, Moxfield, Archidekt
+8. Apri il pannello **🧠 AI Deck Advisor**, inserisci la tua API key e chiedi consigli — l'AI vede le carte che stai guardando
 
 ## 📡 API Endpoints
 
@@ -103,10 +109,12 @@ Documentazione API: **http://localhost:8000/docs**
 | GET | `/api/sets/recent` | Set fisici più recenti |
 | GET | `/api/sets/{code}` | Dettaglio singolo set |
 | GET | `/api/sets/{code}/cards` | Carte di un set |
-| GET | `/api/cards` | Carte con filtri, ordinamento e paginazione |
+| GET | `/api/cards` | Carte con filtri avanzati, sort EDHRec, paginazione |
 | GET | `/api/cards/{id}` | Dettaglio singola carta |
 | POST | `/api/sync/sets` | Sincronizza set da Scryfall |
 | POST | `/api/sync/sets/{code}/cards` | Sincronizza carte di un set |
+| POST | `/api/sync/sets/{code}/cards/family` | Sincronizza set + tutti i sotto-set |
+| GET | `/api/decks/commander?name=X` | Statistiche EDHREC per un commander (multi-tema) |
 | POST | `/api/ai/chat` | Chat con AI advisor |
 
 ## 🤖 AI Deck Advisor
@@ -121,22 +129,24 @@ Il pannello AI supporta più provider:
 | **OpenAI** | A pagamento | gpt-4o-mini |
 | **Ollama** | Locale, gratuito | llama3.1 |
 
-Il sistema usa un approccio **RAG a due step**:
-1. L'AI analizza la domanda e produce keyword di ricerca
-2. Il DB viene interrogato con quelle keyword → solo le carte rilevanti vengono passate all'AI
-3. L'AI genera i consigli basandosi esclusivamente sulle carte reali trovate
+Il sistema usa un approccio **contestuale**:
+- Se l'utente ha carte visibili a schermo, l'AI le usa direttamente come contesto
+- Altrimenti usa un **RAG a due step**: estrae keyword dalla domanda → interroga il DB → passa le carte rilevanti all'AI
+- L'AI riceve anche i dati reali del commander da Scryfall (oracle text, color identity)
+- La temperatura è gestita automaticamente per ogni modello (Gemini 3 usa 1.0)
 
-L'API key viene salvata in `localStorage` e non transita mai sul server in chiaro nei log.
+L'API key viene salvata in `localStorage` e non transita mai nei log del server.
 
 ## 🗺️ Roadmap
 
 - [x] Phase 1 — Scryfall data ingestion & local caching
 - [x] Phase 2 — UI con filtri avanzati e selezione multipla set
 - [x] Phase 3 — AI Deck Advisor (multi-provider, RAG, Scryfall lookup)
-- [ ] Phase 4 — Importazione decklist (incolla lista)
-- [ ] Phase 5 — Analisi mazzo (curve, colori, strategia)
-- [ ] Phase 6 — Semantic search (Qdrant + embeddings)
-- [ ] Phase 7 — LangGraph recommendation agent
+- [x] Phase 4 — Sync sotto-set, filtri AND/OR/NOT, ordinamento EDHRec, esclusione alchemy/token
+- [ ] Phase 5 — Importazione decklist (incolla lista)
+- [ ] Phase 6 — Analisi mazzo (curve, colori, strategia)
+- [ ] Phase 7 — Semantic search (Qdrant + embeddings)
+- [ ] Phase 8 — LangGraph recommendation agent
 
 ## 📁 Struttura del progetto
 
@@ -269,10 +279,12 @@ The API key is stored in `localStorage` and never logged server-side.
 - [x] Phase 1 — Scryfall data ingestion & local caching
 - [x] Phase 2 — UI with advanced filters and multi-set selection
 - [x] Phase 3 — AI Deck Advisor (multi-provider, RAG, Scryfall lookup)
-- [ ] Phase 4 — Decklist import (paste list)
-- [ ] Phase 5 — Deck analysis (curve, colors, strategy)
-- [ ] Phase 6 — Semantic search (Qdrant + embeddings)
-- [ ] Phase 7 — LangGraph recommendation agent
+- [x] Phase 4 — Sub-set sync, AND/OR/NOT filters, EDHRec sort, alchemy/token exclusion, card selection & .txt export
+- [x] Phase 5 — Commander Decks page: EDHREC multi-theme analysis, Scryfall tag filters, partner commanders
+- [ ] Phase 6 — Decklist import (paste list)
+- [ ] Phase 7 — Deck analysis (curve, colors, strategy)
+- [ ] Phase 8 — Semantic search (Qdrant + embeddings)
+- [ ] Phase 9 — LangGraph recommendation agent
 
 ## 📁 Project structure
 

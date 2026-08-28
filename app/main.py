@@ -79,6 +79,11 @@ async def home_page(request: Request):
     """Main page with set sidebar and card grid."""
     return templates.TemplateResponse("index.html", {"request": request})
 
+@app.get("/decks", tags=["Pages"])
+async def decks_page(request: Request):
+    """Commander decks analysis page."""
+    return templates.TemplateResponse("decks.html", {"request": request})
+
 @app.get("/health", tags=["Health"])
 async def health_check():
     return {"status": "healthy", "app": settings.app_name}

@@ -11,6 +11,10 @@
 <!-- ===== HEADER ===== -->
 <div class="header">
     <h1>🃏 MTG Deck Upgrade Assistant</h1>
+    <nav class="page-nav">
+        <a href="/" class="page-nav-btn active">🗂 Explore Cards</a>
+        <a href="/decks" class="page-nav-btn">📋 Commander Decks</a>
+    </nav>
     <div class="status" id="status-bar">Ready</div>
 </div>
 
@@ -49,38 +53,26 @@
             <div class="filter-group">
                 <label>Name:</label>
                 <input type="text" class="filter-input" id="filter-name"
-                       placeholder="Search cards..." onkeyup="debounceLoadCards()">
+                       placeholder="Search cards... (!word to exclude)" onkeyup="debounceLoadCards()">
             </div>
             <div class="filter-group">
                 <label>Text:</label>
                 <input type="text" class="filter-input" id="filter-text"
-                       placeholder="mill, discard, draw..." onkeyup="debounceLoadCards()">
+                       placeholder="mill,discard  (,=OR  ;=AND  !=excl)" onkeyup="debounceLoadCards()">
             </div>
             <div class="filter-group">
                 <label>Type:</label>
                 <input type="text" class="filter-input" id="filter-type"
-                       placeholder="creature, instant..." onkeyup="debounceLoadCards()">
+                       placeholder="creature,!land  (,=OR  ;=AND  !=excl)" onkeyup="debounceLoadCards()">
             </div>
             <div class="filter-group">
-                <label>Rarity:</label>
-                <select class="filter-input" id="filter-rarity" onchange="loadCards()">
-                    <option value="">All</option>
-                    <option value="mythic">Mythic</option>
-                    <option value="rare">Rare</option>
-                    <option value="uncommon">Uncommon</option>
-                    <option value="common">Common</option>
-                </select>
-            </div>
-            <div class="filter-group">
-                <label>Mana Value:</label>
-                <select class="filter-input" id="filter-cmc" onchange="loadCards()">
-                    <option value="">Any</option>
-                    <option value="0-0">0</option>
-                    <option value="0-1">0-1</option>
-                    <option value="2-3">2-3</option>
-                    <option value="4-5">4-5</option>
-                    <option value="6-7">6-7</option>
-                    <option value="8-99">8+</option>
+                <label>Sort:</label>
+                <select class="filter-input" id="filter-sort" onchange="loadCards()">
+                    <option value="name:asc">Name A→Z</option>
+                    <option value="edhrec_rank:asc">EDHRec Rank</option>
+                    <option value="cmc:asc">Mana Value ↑</option>
+                    <option value="cmc:desc">Mana Value ↓</option>
+                    <option value="rarity:desc">Rarity ↓</option>
                 </select>
             </div>
             <div class="cards-count" id="cards-count"></div>
@@ -117,6 +109,11 @@
             <label class="color-check" title="Colorless">
                 <input type="checkbox" value="C" onchange="loadCards()"> <span class="mana mana-c">C</span>
             </label>
+            <div id="set-action-bar" style="display:none; margin-left:auto; display:none; gap:6px; align-items:center">
+                <span id="set-action-label" style="font-size:0.8rem;color:#e94560;font-weight:600"></span>
+                <button class="btn btn-primary btn-sm" onclick="refreshSelectedSets()">⬇ with sub-sets</button>
+                <button class="btn btn-sm" onclick="refreshSelectedSetsMainOnly()">Main only</button>
+            </div>
         </div>
 
         <!-- Card Grid -->
@@ -130,6 +127,24 @@
     </div>
 </div>
 
+</div><!-- end main-layout -->
+
+<!-- ===== EXPORT BAR ===== -->
+<div id="export-bar" style="display:none">
+    <span id="export-count">0 cards selected</span>
+    <button class="btn btn-primary btn-sm" onclick="exportTxt()">⬇ Export .txt</button>
+    <button class="btn btn-sm" onclick="clearSelection()">✕ Clear</button>
+</div>
+
+<!-- ===== SYNC OVERLAY ===== -->
+<div id="sync-overlay" style="display:none">
+    <div class="sync-overlay-box">
+        <div class="sync-spinner"></div>
+        <div id="sync-overlay-title" class="sync-overlay-title">Downloading...</div>
+        <div id="sync-overlay-msg" class="sync-overlay-msg"></div>
+    </div>
+</div>
+
 <!-- ===== AI CHAT BUTTON ===== -->
 <button class="chat-toggle" onclick="toggleChat()" title="AI Assistant">🧠</button>
 
@@ -137,7 +152,10 @@
 <div class="chat-panel" id="chat-panel">
     <div class="chat-header">
         <h3>🧠 AI Deck Advisor</h3>
-        <button class="chat-close" onclick="toggleChat()">✕</button>
+        <div style="display:flex;gap:6px">
+            <button class="chat-close" onclick="toggleWideChat()" id="btn-wide" title="Expand">⤢</button>
+            <button class="chat-close" onclick="toggleChat()">✕</button>
+        </div>
     </div>
 
     <!-- Settings -->
@@ -183,6 +201,7 @@ Then I'll recommend the best cards for your deck!</div>
 <!-- ===== JAVASCRIPT ===== -->
 <script>
 let selectedSets = new Set();
+let selectedCards = new Set();
 let debounceTimer = null;
 let currentPage = 1;
 
@@ -239,7 +258,10 @@ async function loadSets() {
                 + '<div class="set-name">' + s.name + '</div>'
                 + '<div class="set-meta">' + (s.released_at || 'TBD') + ' · ' + s.card_count + ' cards</div>'
                 + '</div>'
+                + '<div style="display:flex;align-items:center;gap:4px">'
                 + '<div class="set-code">' + s.code + '</div>'
+                + '<button class="set-delete-btn" onclick="deleteSetCards(event,\'' + s.code + '\',\'' + safeName + '\')" title="Delete cached cards">\u2715</button>'
+                + '</div>'
                 + '</div>';
         }
         document.getElementById('set-list').innerHTML = html;
@@ -267,46 +289,112 @@ async function selectSet(code, name) {
         document.getElementById('card-grid').innerHTML =
             '<div class="empty-state"><h3>Select a set to explore cards</h3></div>';
         document.getElementById('cards-count').textContent = '';
+        document.getElementById('pagination').style.display = 'none';
         setStatus('Ready');
+        updateSetActionBar();
         return;
     }
 
     setStatus('Loading cards for ' + Array.from(selectedSets).join(', ') + '...');
+    updateSetActionBar();
 
-    // Check if newly added set has cards synced
+    // Check if newly added set has cards synced — show a notice but don't block the grid
     if (selectedSets.has(code)) {
         const resp = await fetch('/api/cards?set=' + code + '&page_size=1');
         const data = await resp.json();
         if (data.total === 0) {
-            document.getElementById('card-grid').innerHTML =
-                '<div class="empty-state">'
-                + '<h3>No cards cached for ' + name + '</h3>'
-                + '<p>Cards need to be downloaded from Scryfall first.</p><br>'
-                + '<button class="btn btn-primary" onclick="syncCardsForSet(\'' + code + '\', \'' + name.replace(/'/g, "\\'") + '\')">Download Cards for ' + name + '</button>'
-                + '</div>';
-            setStatus('Set ' + code + ' — cards not yet synced');
-            return;
+            // Mark the set item in the sidebar as unsynced
+            document.querySelectorAll('.set-item').forEach(function(el) {
+                if (el.querySelector('.set-code').textContent.trim().toLowerCase() === code) {
+                    el.classList.add('not-synced');
+                    if (!el.querySelector('.sync-badge')) {
+                        var badge = document.createElement('span');
+                        badge.className = 'sync-badge';
+                        badge.title = 'Not yet synced';
+                        badge.textContent = '!';
+                        el.appendChild(badge);
+                    }
+                }
+            });
         }
     }
 
     loadCards();
 }
 
-// --- Sync cards for a set ---
-async function syncCardsForSet(code, name) {
-    setStatus('Downloading cards for ' + name + '...');
-    document.getElementById('card-grid').innerHTML =
-        '<div class="loading"><div class="spinner"></div><p>Downloading cards for ' + name + '...<br>This may take a moment.</p></div>';
+async function deleteSetCards(event, code, name) {
+    event.stopPropagation();
+    if (!confirm('Delete all cached cards for ' + name + ' (including sub-sets)?')) return;
+    const resp = await fetch('/api/sync/sets/' + code + '/cards', { method: 'DELETE' });
+    const data = await resp.json();
+    setStatus('Deleted ' + data.deleted + ' cards for ' + data.sets.join(', '));
+    // Mark set as unsynced in sidebar
+    document.querySelectorAll('.set-item').forEach(function(el) {
+        if (el.querySelector('.set-code') && el.querySelector('.set-code').textContent.trim().toLowerCase() === code) {
+            el.classList.add('not-synced');
+            if (!el.querySelector('.sync-badge')) {
+                var badge = document.createElement('span');
+                badge.className = 'sync-badge';
+                badge.textContent = '!';
+                el.querySelector('[style]').insertBefore(badge, el.querySelector('.set-delete-btn'));
+            }
+        }
+    });
+    selectedSets.delete(code);
+    updateSetActionBar();
+    loadCards();
+}
 
+function markSetSynced(code) {
+    document.querySelectorAll('.set-item').forEach(function(el) {
+        if (el.querySelector('.set-code').textContent.trim().toLowerCase() === code.toLowerCase()) {
+            el.classList.remove('not-synced');
+            var badge = el.querySelector('.sync-badge');
+            if (badge) badge.remove();
+        }
+    });
+}
+
+function showSyncOverlay(title, msg) {
+    document.getElementById('sync-overlay-title').textContent = title;
+    document.getElementById('sync-overlay-msg').textContent = msg || '';
+    document.getElementById('sync-overlay').style.display = 'flex';
+}
+
+function hideSyncOverlay() {
+    document.getElementById('sync-overlay').style.display = 'none';
+}
+
+// --- Sync main set only ---
+async function syncCardsForSet(code, name) {
+    showSyncOverlay('Downloading ' + name, 'Fetching cards from Scryfall...');
     try {
         const resp = await fetch('/api/sync/sets/' + code + '/cards', { method: 'POST' });
         const data = await resp.json();
+        markSetSynced(code);
         setStatus('Synced ' + data.total_retrieved + ' cards for ' + name);
         loadCards();
     } catch (err) {
         setStatus('Error syncing cards: ' + err.message);
-        document.getElementById('card-grid').innerHTML =
-            '<div class="empty-state"><h3>Error: ' + err.message + '</h3></div>';
+    } finally {
+        hideSyncOverlay();
+    }
+}
+
+// --- Sync set + all sub-sets ---
+async function syncCardsForFamily(code, name) {
+    showSyncOverlay('Downloading ' + name + ' + sub-sets', 'This may take a minute...');
+    try {
+        const resp = await fetch('/api/sync/sets/' + code + '/cards/family', { method: 'POST' });
+        const data = await resp.json();
+        markSetSynced(code);
+        const family = data.family ? data.family.join(', ') : code;
+        setStatus('Synced ' + data.total_retrieved + ' cards across: ' + family);
+        loadCards();
+    } catch (err) {
+        setStatus('Error syncing: ' + err.message);
+    } finally {
+        hideSyncOverlay();
     }
 }
 
@@ -317,22 +405,19 @@ async function loadCards() {
     const name = document.getElementById('filter-name').value;
     const text = document.getElementById('filter-text').value;
     const type = document.getElementById('filter-type').value;
-    const rarity = document.getElementById('filter-rarity').value;
     const colors = getSelectedColors();
-    const cmc = document.getElementById('filter-cmc').value;
+    const sortVal = document.getElementById('filter-sort').value.split(':');
+    const sortBy = sortVal[0];
+    const sortDir = sortVal[1] || 'asc';
 
     // Build URL with multiple set= params
     let url = '/api/cards?' + Array.from(selectedSets).map(s => 'set=' + s).join('&')
-        + '&page=' + currentPage + '&page_size=60&unique=true';
+        + '&page=' + currentPage + '&page_size=60&unique=true'
+        + '&sort_by=' + sortBy + '&sort_dir=' + sortDir;
     if (name) url += '&name=' + encodeURIComponent(name);
     if (text) url += '&text=' + encodeURIComponent(text);
     if (type) url += '&type=' + encodeURIComponent(type);
-    if (rarity) url += '&rarity=' + rarity;
     if (colors) url += '&colors=' + colors;
-    if (cmc) {
-        var parts = cmc.split('-');
-        url += '&min_cmc=' + parts[0] + '&max_cmc=' + parts[1];
-    }
 
     try {
         const resp = await fetch(url);
@@ -364,17 +449,26 @@ async function loadCards() {
             var imgUrl = card.image_uris ? card.image_uris.normal : null;
             var scryfallUrl = card.scryfall_uri || '#';
 
+            var isSelected = selectedCards.has(card.name) ? ' selected' : '';
+            var checkMark = selectedCards.has(card.name) ? '✓' : '○';
+            var actions = '<div class="card-actions">'
+                + '<div class="card-check" onclick="toggleCardSelection(\'' + card.name.replace(/'/g, "\\'") + '\', this.closest(\'.card-item\'))">' + checkMark + '</div>'
+                + '<a class="card-scryfall-link" href="' + scryfallUrl + '" target="_blank" onclick="event.stopPropagation()" title="Scryfall">↗</a>'
+                + '</div>';
             if (imgUrl) {
-                html += '<div class="card-item" onclick="window.open(\'' + scryfallUrl + '\', \'_blank\')" title="' + card.name + '">'
+                html += '<div class="card-item' + isSelected + '" onclick="toggleCardSelection(\'' + card.name.replace(/'/g, "\\'") + '\', this)" title="' + card.name + '">'
                     + '<img src="' + imgUrl + '" alt="' + card.name + '" loading="lazy">'
+                    + actions
                     + '</div>';
             } else {
-                html += '<div class="card-item" onclick="window.open(\'' + scryfallUrl + '\', \'_blank\')" title="' + card.name + '">'
+                html += '<div class="card-item' + isSelected + '" onclick="toggleCardSelection(\'' + card.name.replace(/'/g, "\\'") + '\', this)" title="' + card.name + '">'
                     + '<div class="no-image">'
                     + '<div class="card-title">' + card.name + '</div>'
                     + '<div class="card-type">' + (card.type_line || '') + '</div>'
                     + '<div class="card-type">' + (card.mana_cost || '') + '</div>'
-                    + '</div></div>';
+                    + '</div>'
+                    + actions
+                    + '</div>';
             }
         }
         document.getElementById('card-grid').innerHTML = html;
@@ -384,9 +478,96 @@ async function loadCards() {
     }
 }
 
+function toggleCardSelection(name, el) {
+    if (selectedCards.has(name)) {
+        selectedCards.delete(name);
+        el.classList.remove('selected');
+        el.querySelector('.card-check').textContent = '○';
+    } else {
+        selectedCards.add(name);
+        el.classList.add('selected');
+        el.querySelector('.card-check').textContent = '✓';
+    }
+    updateExportBar();
+}
+
+function updateExportBar() {
+    var bar = document.getElementById('export-bar');
+    var count = selectedCards.size;
+    if (count > 0) {
+        bar.style.display = 'flex';
+        document.getElementById('export-count').textContent = count + ' card' + (count !== 1 ? 's' : '') + ' selected';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+function clearSelection() {
+    selectedCards.clear();
+    document.querySelectorAll('.card-item.selected').forEach(function(el) {
+        el.classList.remove('selected');
+        el.querySelector('.card-check').textContent = '';
+    });
+    updateExportBar();
+}
+
+function exportTxt() {
+    var text = Array.from(selectedCards).join('\n');
+    var blob = new Blob([text], { type: 'text/plain' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'deck-upgrade-' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+}
+
 function resizeCards(value) {
     document.getElementById('card-grid').style.gridTemplateColumns =
         'repeat(auto-fill, minmax(' + value + 'px, 1fr))';
+}
+
+function updateSetActionBar() {
+    const bar = document.getElementById('set-action-bar');
+    const label = document.getElementById('set-action-label');
+    if (selectedSets.size === 0) {
+        bar.style.display = 'none';
+    } else {
+        bar.style.display = 'flex';
+        label.textContent = Array.from(selectedSets).join(', ').toUpperCase();
+    }
+}
+
+async function refreshSelectedSets() {
+    const codes = Array.from(selectedSets);
+    showSyncOverlay('Downloading ' + codes.join(', ').toUpperCase() + ' + sub-sets', 'This may take a minute...');
+    try {
+        for (const code of codes) {
+            document.getElementById('sync-overlay-msg').textContent = 'Syncing ' + code.toUpperCase() + '...';
+            const resp = await fetch('/api/sync/sets/' + code + '/cards/family', { method: 'POST' });
+            const data = await resp.json();
+            markSetSynced(code);
+        }
+        updateSetActionBar();
+        setStatus('Refresh completato');
+        loadCards();
+    } finally {
+        hideSyncOverlay();
+    }
+}
+
+async function refreshSelectedSetsMainOnly() {
+    const codes = Array.from(selectedSets);
+    showSyncOverlay('Downloading ' + codes.join(', ').toUpperCase(), 'Main sets only...');
+    try {
+        for (const code of codes) {
+            document.getElementById('sync-overlay-msg').textContent = 'Syncing ' + code.toUpperCase() + '...';
+            await fetch('/api/sync/sets/' + code + '/cards', { method: 'POST' });
+            markSetSynced(code);
+        }
+        setStatus('Refresh completato');
+        loadCards();
+    } finally {
+        hideSyncOverlay();
+    }
 }
 
 function changePage(delta) {
@@ -408,11 +589,18 @@ function debounceLoadCards() {
 // ---------------------------------------------------------------------------
 var chatHistory = [];
 
+function toggleWideChat() {
+    const panel = document.getElementById('chat-panel');
+    const btn = document.getElementById('btn-wide');
+    panel.classList.toggle('wide');
+    btn.textContent = panel.classList.contains('wide') ? '⤡' : '⤢';
+}
+
 function toggleChat() {
     const panel = document.getElementById('chat-panel');
     const btn = document.querySelector('.chat-toggle');
     panel.classList.toggle('open');
-    btn.style.display = panel.classList.contains('open') ? 'none' : 'flex';
+    btn.style.display = panel.classList.contains('open') ? 'none' : '';
 }
 
 function onProviderChange() {
@@ -472,9 +660,22 @@ async function sendChat() {
     addChatMessage('user', message);
     input.value = '';
 
+    // Show thinking indicator
+    var thinkingDiv = document.createElement('div');
+    thinkingDiv.className = 'chat-msg thinking';
+    thinkingDiv.id = 'thinking-indicator';
+    thinkingDiv.innerHTML = '<span></span><span></span><span></span>';
+    document.getElementById('chat-messages').appendChild(thinkingDiv);
+    document.getElementById('chat-messages').scrollTop = 99999;
+
     var sendBtn = document.getElementById('chat-send');
     sendBtn.disabled = true;
     sendBtn.textContent = '...';
+
+    // Collect visible card names from the grid (title attribute on each card item)
+    var visibleCards = Array.from(document.querySelectorAll('.card-item[title]'))
+        .map(function(el) { return el.getAttribute('title'); })
+        .filter(Boolean);
 
     var body = {
         message: message,
@@ -482,9 +683,10 @@ async function sendChat() {
         api_key: apiKey || null,
         set_codes: Array.from(selectedSets),
         history: chatHistory,
+        visible_cards: visibleCards.length > 0 ? visibleCards : null,
     };
 
-    console.log('[AI] sending request:', { message, provider, set_codes: Array.from(selectedSets) });
+    console.log('[AI] sending request:', { message, provider, set_codes: Array.from(selectedSets), visible_cards: visibleCards.length });
 
     try {
         var resp = await fetch('/api/ai/chat', {
@@ -494,6 +696,8 @@ async function sendChat() {
         });
 
         var data = await resp.json();
+        var t = document.getElementById('thinking-indicator');
+        if (t) t.remove();
 
         if (resp.ok) {
             addChatMessage('ai', data.response);
@@ -504,6 +708,8 @@ async function sendChat() {
             addChatMessage('error', 'Error: ' + (data.detail || JSON.stringify(data)));
         }
     } catch (err) {
+        var t = document.getElementById('thinking-indicator');
+        if (t) t.remove();
         addChatMessage('error', 'Connection error: ' + err.message);
     }
 

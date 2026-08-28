@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db
 from app.models.card_model import MTGCard
+from app.models.set_model import MTGSet
 
 router = APIRouter()
 
@@ -34,25 +35,72 @@ async def list_cards(
 ):
     """List cards with filters, sorting, pagination, and deduplication."""
 
+    # Layouts to always exclude (tokens, art cards, emblems, memorabilia)
+    EXCLUDED_LAYOUTS = ('token', 'double_faced_token', 'art_series', 'emblem',
+                        'planar', 'scheme', 'vanguard', 'augment', 'host', 'memorabilia')
+
+    # Expand set_code to include sub-sets, excluding alchemy sub-sets
+    effective_codes = list(set_code) if set_code else []
+    if effective_codes:
+        sub_result = await db.execute(
+            select(MTGSet.code).where(
+                MTGSet.parent_set_code.in_(effective_codes) &
+                (MTGSet.set_type != 'alchemy') &
+                (MTGSet.digital == False)
+            )
+        )
+        effective_codes = list(set(effective_codes + [r[0] for r in sub_result.fetchall()]))
+        # Also exclude any explicitly-selected alchemy sets
+        alchemy_result = await db.execute(
+            select(MTGSet.code).where(
+                MTGSet.code.in_(effective_codes) & (MTGSet.set_type == 'alchemy')
+            )
+        )
+        alchemy_codes = {r[0] for r in alchemy_result.fetchall()}
+        effective_codes = [c for c in effective_codes if c not in alchemy_codes]
+
     # --- Build subquery for unique cards (pick lowest id per name) ---
     if unique:
-        # Get the first printing of each card name in the filtered set
         sub = select(func.min(MTGCard.id).label("min_id"))
-        if set_code:
-            sub = sub.where(MTGCard.set_code.in_(set_code))
+        if effective_codes:
+            sub = sub.where(MTGCard.set_code.in_(effective_codes))
+        sub = sub.where(~MTGCard.layout.in_(EXCLUDED_LAYOUTS))
+        sub = sub.where(~MTGCard.type_line.ilike("%Basic Land%"))
+        sub = sub.where(MTGCard.type_line != "Card")
         sub = sub.group_by(MTGCard.name).subquery()
 
         query = select(MTGCard).where(MTGCard.id.in_(select(sub.c.min_id)))
     else:
         query = select(MTGCard)
-        if set_code:
-            query = query.where(MTGCard.set_code.in_(set_code))
+        if effective_codes:
+            query = query.where(MTGCard.set_code.in_(effective_codes))
+        query = query.where(~MTGCard.layout.in_(EXCLUDED_LAYOUTS))
+        query = query.where(~MTGCard.type_line.ilike("%Basic Land%"))
+        query = query.where(MTGCard.type_line != "Card")
+
+    def _parse_filter(q, column, value):
+        """, = OR between groups  ;  = AND between terms  ! = exclude."""
+        or_groups = [g.strip() for g in value.split(',') if g.strip()]
+        or_clauses = []
+        for group in or_groups:
+            and_terms = [t.strip() for t in group.split(';') if t.strip()]
+            and_clause = None
+            for term in and_terms:
+                exclude = term.startswith('!') or term.startswith('-')
+                word = term[1:] if exclude else term
+                cond = ~column.ilike(f"%{word}%") if exclude else column.ilike(f"%{word}%")
+                and_clause = cond if and_clause is None else and_clause & cond
+            if and_clause is not None:
+                or_clauses.append(and_clause)
+        if or_clauses:
+            q = q.where(or_(*or_clauses))
+        return q
 
     # --- Filters ---
     if name:
-        query = query.where(MTGCard.name.ilike(f"%{name}%"))
+        query = _parse_filter(query, MTGCard.name, name)
     if type_line:
-        query = query.where(MTGCard.type_line.ilike(f"%{type_line}%"))
+        query = _parse_filter(query, MTGCard.type_line, type_line)
     if rarity:
         query = query.where(MTGCard.rarity == rarity)
     if min_cmc is not None:
@@ -60,8 +108,7 @@ async def list_cards(
     if max_cmc is not None:
         query = query.where(MTGCard.cmc <= max_cmc)
     if text:
-        terms = [t.strip() for t in text.split(",") if t.strip()]
-        query = query.where(or_(*[MTGCard.oracle_text.ilike(f"%{t}%") for t in terms]))
+        query = _parse_filter(query, MTGCard.oracle_text, text)
 
     # Color identity filtering (for Commander)
     # Show cards whose color_identity is WITHIN the selected colors
@@ -106,11 +153,17 @@ async def list_cards(
         "released_at": MTGCard.released_at,
         "set_code": MTGCard.set_code,
         "type_line": MTGCard.type_line,
+        "edhrec_rank": MTGCard.edhrec_rank,
     }
     sort_col = sort_columns.get(sort_by, MTGCard.name)
-    if sort_dir.lower() == "desc":
-        sort_col = sort_col.desc()
-    query = query.order_by(sort_col)
+    # edhrec_rank: nulls last (cards without rank go to the bottom)
+    if sort_by == "edhrec_rank":
+        from sqlalchemy import nulls_last
+        query = query.order_by(nulls_last(sort_col.asc() if sort_dir.lower() == "asc" else sort_col.desc()))
+    else:
+        if sort_dir.lower() == "desc":
+            sort_col = sort_col.desc()
+        query = query.order_by(sort_col)
 
     # --- Pagination ---
     offset = (page - 1) * page_size
