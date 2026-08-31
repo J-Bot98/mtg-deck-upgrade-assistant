@@ -79,16 +79,18 @@ class LLMClient:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 2000,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> str:
         """Send a message to the LLM and return the response text."""
-        # Gemini 3.x requires temperature=1.0 to avoid infinite loops / degraded output
         if "gemini-3" in self.model or "gemini/gemini-3" in self.model:
             temperature = 1.0
 
         messages: List[Dict[str, str]] = []
-
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
+        # Inject conversation history before the current message
+        if history:
+            messages.extend(history)
         messages.append({"role": "user", "content": user_message})
 
         try:

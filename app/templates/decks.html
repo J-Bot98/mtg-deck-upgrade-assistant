@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Commander Decks · MTG Deck Upgrade Assistant</title>
+    <title>Explore EDHREC · MTG Deck Upgrade Assistant</title>
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
 <div class="header">
     <h1>🃏 MTG Deck Upgrade Assistant</h1>
     <nav class="page-nav">
-        <a href="/" class="page-nav-btn">🗂 Explore Cards</a>
-        <a href="/decks" class="page-nav-btn active">📋 Commander Decks</a>
+        <a href="/" class="page-nav-btn">� New Sets</a>
+        <a href="/decks" class="page-nav-btn active">🦾 Explore EDHREC</a>
     </nav>
     <div class="status" id="status-bar">Ready</div>
 </div>
@@ -22,7 +22,7 @@
 <div class="deck-page">
 
     <div class="deck-page-header">
-        <h2>📋 Commander Decks</h2>
+        <h2>🦾 Explore EDHREC</h2>
         <p>Search <strong>EDHREC</strong> for Commander card statistics — inclusion rate and synergy score across thousands of registered decks.</p>
     </div>
 
@@ -283,9 +283,9 @@ function updateExportBar() {
 
 function clearSelection() {
     selectedCards.clear();
-    document.querySelectorAll('.deck-card-row.selected').forEach(function(el) {
+    document.querySelectorAll('.card-item.selected').forEach(function(el) {
         el.classList.remove('selected');
-        el.querySelector('.deck-card-check').textContent = '○';
+        var chk = el.querySelector('.card-check'); if (chk) chk.textContent = '○';
     });
     updateExportBar();
 }
@@ -303,11 +303,11 @@ function toggleDeckCard(name, el) {
     if (selectedCards.has(name)) {
         selectedCards.delete(name);
         el.classList.remove('selected');
-        el.querySelector('.deck-card-check').textContent = '○';
+        var chk = el.querySelector('.card-check'); if (chk) chk.textContent = '○';
     } else {
         selectedCards.add(name);
         el.classList.add('selected');
-        el.querySelector('.deck-card-check').textContent = '✓';
+        var chk = el.querySelector('.card-check'); if (chk) chk.textContent = '✓';
     }
     updateExportBar();
 }

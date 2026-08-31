@@ -139,6 +139,7 @@ class AIService:
                 system_prompt=SYSTEM_PROMPT,
                 temperature=0.7,
                 max_tokens=3000,
+                history=list(conversation_history) if conversation_history else None,
             )
             logger.info("  [step 3] LLM response: %d chars", len(response))
             logger.info("────────────────────────────────────────")
